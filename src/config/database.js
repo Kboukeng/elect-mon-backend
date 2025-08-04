@@ -1,16 +1,12 @@
-// filepath: d:\DEV\ELECT-MON\elect-mon-backend\src\config\database.js
-import { createClient } from "@supabase/supabase-js";
-import dotenv from "dotenv";
-
-dotenv.config(); // Ensure this is called before accessing environment variables
+const { createClient } = require("@supabase/supabase-js");
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  throw new Error(
-    "SUPABASE_URL and SUPABASE_KEY must be defined in the .env file"
-  );
+  throw new Error("Missing Supabase environment variables");
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+module.exports = supabase;

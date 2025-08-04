@@ -1,20 +1,25 @@
-import fs from 'fs';
-import path from 'path';
+const winston = require("winston");
 
-const logFilePath = path.join(__dirname, '../logs/app.log');
+const logger = winston.createLogger({
+  level: "info",
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
+    winston.format.json()
+  ),
+  defaultMeta: { service: "election-monitoring" },
+  transports: [
+    new winston.transports.File({ filename: "logs/error.log", level: "error" }),
+    new winston.transports.File({ filename: "logs/combined.log" }),
+  ],
+});
 
-const logMessage = (message) => {
-  const timestamp = new Date().toISOString();
-  const logEntry = `${timestamp} - ${message}\n`;
-  console.log(logEntry);
-  fs.appendFileSync(logFilePath, logEntry);
-};
+if (process.env.NODE_ENV !== "production") {
+  logger.add(
+    new winston.transports.Console({
+      format: winston.format.simple(),
+    })
+  );
+}
 
-const logError = (error) => {
-  const timestamp = new Date().toISOString();
-  const logEntry = `${timestamp} - ERROR: ${error}\n`;
-  console.error(logEntry);
-  fs.appendFileSync(logFilePath, logEntry);
-};
-
-export { logMessage, logError };
+module.exports = logger;

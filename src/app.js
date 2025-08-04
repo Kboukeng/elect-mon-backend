@@ -1,31 +1,68 @@
-import express from 'express';
-import helmet from 'helmet';
-import cors from 'cors';
-// import { json } from 'body-parser';
-import incidentRoutes from './routes/incident.routes.js';
-import userRoutes from './routes/user.routes.js';
-import dotenv from "dotenv";
-import bodyParser from "body-parser"; // Use default import
+const express = require("express");
+const helmet = require("helmet");
+const cors = require("cors");
+const compression = require("compression");
+const rateLimit = require("express-rate-limit");
+require("dotenv").config();
 
-const { json } = bodyParser; // Destructure the json method
+const authRoutes = require("./routes/authRoutes");
+const stationRoutes = require("./routes/stationRoutes");
+const voterRoutes = require("./routes/voterRoutes");
+const reportRoutes = require("./routes/reportRoutes");
+const resultRoutes = require("./routes/resultRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 
-dotenv.config();
+const logger = require("./utils/logger");
+const { errorHandler } = require("./middlewares/errorHandler");
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-// Middleware
+// Security Middleware
 app.use(helmet());
-app.use(cors());
-app.use(json());
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    credentials: true,
+  })
+);
+app.use(compression());
+
+// Rate Limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: "Too many requests from this IP, please try again later.",
+});
+app.use(limiter);
+
+// Body parsing middleware
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
 
 // Routes
-app.use('/api/incidents', incidentRoutes);
-app.use('/api/users', userRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/api/stations", stationRoutes);
+app.use("/api/voters", voterRoutes);
+app.use("/api/reports", reportRoutes);
+app.use("/api/results", resultRoutes);
+app.use("/api/dashboard", dashboardRoutes);
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ error: 'Something went wrong!' });
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({ status: "OK", timestamp: new Date().toISOString() });
 });
 
-export default app;
+// Error handling
+app.use(errorHandler);
+
+// 404 handler
+app.use("*", (req, res) => {
+  res.status(404).json({ error: "Route not found" });
+});
+
+app.listen(PORT, () => {
+  logger.info(`Election Monitoring System running on port ${PORT}`);
+});
+
+module.exports = app;
