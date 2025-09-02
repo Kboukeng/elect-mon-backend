@@ -13,15 +13,11 @@ router.post(
   authController.register
 );
 
-router.post("/login", authController.login);
+router.post("/login", validateRequest(schemas.login), authController.login);
 
 router.post("/logout", authenticateToken, authController.logout);
 
-router.get(
-  "/profile",
-  authenticateToken,
-  authController.getProfile
-);
+router.get("/profile", authenticateToken, authController.getProfile);
 
 router.get(
   "/getUsers",
@@ -31,11 +27,11 @@ router.get(
 );
 
 router.get(
-    "/user/:id",
-    authenticateToken,
-    requireRole(["super_admin"]),
-    authController.getUserById
-    );
+  "/user/:id",
+  authenticateToken,
+  requireRole(["super_admin"]),
+  authController.getUserById
+);
 
 router.put(
   "/user/:id",
@@ -48,7 +44,8 @@ router.put(
 router.put(
   "/user-password/:id",
   authenticateToken,
-  validateRequest(schemas.updateProfile),
+  requireRole(["super_admin"]), // Add role requirement for password changes
+  validateRequest(schemas.changePassword),
   authController.changePassword
 );
 

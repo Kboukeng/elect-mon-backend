@@ -1,4 +1,4 @@
-const supabase = require("../config/supabase");
+const supabase = require("../config/database");
 const csv = require("csv-parser");
 const fs = require("fs");
 const { auditLog } = require("../utils/auditLogger");

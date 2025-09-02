@@ -1,5 +1,5 @@
-const supabase = require("../config/supabase");
-const twilioService = require("../services/twilioService");
+const supabase = require("../config/database");
+const TwilioService = require("../config/twilio")
 const logger = require("../utils/logger");
 
 class ReportController {
@@ -9,7 +9,7 @@ class ReportController {
 
       logger.info(`Received SMS from ${phoneNumber}: ${message}`);
 
-      const { type, stationId } = twilioService.parseSMSReport(message);
+      const { type, stationId } = TwilioService.parseSMSReport(message);
 
       // Verify station exists
       const { data: station, error: stationError } = await supabase
@@ -19,7 +19,7 @@ class ReportController {
         .single();
 
       if (stationError || !station) {
-        await twilioService.sendSMS(phoneNumber, "Error: Station not found");
+        await TwilioService.sendSMS(phoneNumber, "Error: Station not found");
         return res.status(400).json({ error: "Station not found" });
       }
 
@@ -38,7 +38,7 @@ class ReportController {
       if (reportError) throw reportError;
 
       // Send confirmation SMS
-      await twilioService.sendSMS(
+      await TwilioService.sendSMS(
         phoneNumber,
         `Report ${report.id} received for station ${stationId}. Type: ${type}`
       );

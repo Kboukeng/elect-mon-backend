@@ -25,6 +25,29 @@ const schemas = {
       .optional(),
   }),
 
+  login: Joi.object({
+    email: Joi.string().email().required(),
+    password: Joi.string().required(),
+  }),
+
+  updateUser: Joi.object({
+    name: Joi.string().min(2).max(100).optional(),
+    email: Joi.string().email().optional(),
+    role: Joi.string().valid("super_admin", "admin", "worker").optional(),
+    stationId: Joi.string()
+      .pattern(/^STA\d{3}$/)
+      .optional(),
+  }),
+
+  updateProfile: Joi.object({
+    name: Joi.string().min(2).max(100).optional(),
+    email: Joi.string().email().optional(),
+  }),
+
+  changePassword: Joi.object({
+    password: Joi.string().min(6).required(),
+  }),
+
   station: Joi.object({
     name: Joi.string().min(2).max(100).required(),
     location: Joi.string().min(2).max(100).required(),
