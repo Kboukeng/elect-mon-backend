@@ -39,6 +39,73 @@ class TwilioService {
 
     return { type, stationId };
   }
+
+  // ADD/UPDATE this method to parse SMS reports
+  parseSMSReport(message) {
+    // Convert message to lowercase for easier parsing
+    const msg = message.toLowerCase().trim();
+
+    // Initialize defaults
+    let type = "incident"; // default type
+    let stationId = null;
+
+    // Extract station ID - look for patterns like "station 123", "st 123", "123"
+    const stationPatterns = [
+      /station\s+(\d+)/,
+      /st\s+(\d+)/,
+      /stn\s+(\d+)/,
+      /^(\d+)/, // number at start
+      /(\d+)$/, // number at end
+    ];
+
+    for (const pattern of stationPatterns) {
+      const match = msg.match(pattern);
+      if (match) {
+        stationId = match[1];
+        break;
+      }
+    }
+
+    // Extract report type based on keywords
+    const typeKeywords = {
+      equipment: "equipment_failure",
+      broken: "equipment_failure",
+      malfunction: "equipment_failure",
+      machine: "equipment_failure",
+      queue: "queue_issue",
+      line: "queue_issue",
+      waiting: "queue_issue",
+      crowd: "queue_issue",
+      security: "security_concern",
+      fight: "security_concern",
+      violence: "security_concern",
+      threat: "security_concern",
+      access: "accessibility_issue",
+      disabled: "accessibility_issue",
+      wheelchair: "accessibility_issue",
+      ramp: "accessibility_issue",
+      incident: "incident",
+      problem: "incident",
+      issue: "incident",
+      help: "other",
+      other: "other",
+    };
+
+    // Check for type keywords in message
+    for (const [keyword, reportType] of Object.entries(typeKeywords)) {
+      if (msg.includes(keyword)) {
+        type = reportType;
+        break;
+      }
+    }
+
+    // Log the parsing result
+    console.log(
+      `SMS Parsing: "${message}" -> Station: ${stationId}, Type: ${type}`
+    );
+
+    return { type, stationId };
+  }
 }
 
 module.exports = new TwilioService();

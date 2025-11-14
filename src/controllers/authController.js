@@ -1,6 +1,12 @@
 const supabase = require("../config/database");
 const logger = require("../utils/logger");
 const { auditLog } = require("../utils/auditLogger");
+const fs = require("fs");
+const path = require("path");
+const xlsx = require("xlsx");
+const pdfParse = require("pdf-parse");
+const mammoth = require("mammoth");
+const csv = require("csv-parser");
 
 class AuthController {
   async register(req, res) {
@@ -271,6 +277,280 @@ class AuthController {
       res.status(500).json({ error: "Failed to delete user" });
     }
   }
+
+  // Add this method to the existing AuthController class
+
+async importUsers(req, res) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "File required" });
+    }
+
+    const filePath = req.file.path;
+    const fileExtension = path.extname(req.file.originalname).toLowerCase();
+    const { stationId } = req.body; // Optional station ID from form
+    
+    let users = [];
+
+    try {
+      switch (fileExtension) {
+        case '.csv':
+          users = await this.processUserCSV(filePath);
+          break;
+        case '.xlsx':
+        case '.xls':
+          users = await this.processUserExcel(filePath);
+          break;
+        case '.pdf':
+          users = await this.processUserPDF(filePath);
+          break;
+        case '.docx':
+        case '.doc':
+          users = await this.processUserWord(filePath);
+          break;
+        default:
+          throw new Error(`Unsupported file format: ${fileExtension}`);
+      }
+
+      if (users.length === 0) {
+        throw new Error("No valid user data found in the file");
+      }
+
+      // Validate and process users
+      const validUsers = this.validateUserImportData(users, stationId);
+
+      if (validUsers.length === 0) {
+        throw new Error("No valid users found. Please check your data format.");
+      }
+
+      // Create users in batch
+      const createdUsers = [];
+      const errors = [];
+
+      for (const userData of validUsers) {
+        try {
+          // Create user in Supabase Auth
+          const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+            email: userData.email,
+            password: userData.password,
+            email_confirm: true,
+          });
+
+          if (authError) {
+            errors.push(`Failed to create auth for ${userData.email}: ${authError.message}`);
+            continue;
+          }
+
+          // Create staff record
+          const { data: staff, error: staffError } = await supabase
+            .from("staff")
+            .insert([
+              {
+                name: userData.name,
+                email: userData.email,
+                role: userData.role,
+                station_id: userData.stationId,
+                auth_id: authData.user.id,
+              },
+            ])
+            .select()
+            .single();
+
+          if (staffError) {
+            // Cleanup auth user if staff creation fails
+            await supabase.auth.admin.deleteUser(authData.user.id);
+            errors.push(`Failed to create staff record for ${userData.email}: ${staffError.message}`);
+            continue;
+          }
+
+          createdUsers.push(staff);
+          await auditLog("IMPORT", "staff", staff.id);
+
+        } catch (error) {
+          errors.push(`Error creating user ${userData.email}: ${error.message}`);
+        }
+      }
+
+      res.json({
+        message: `${createdUsers.length} users imported successfully`,
+        users: createdUsers,
+        skipped: users.length - createdUsers.length,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+
+    } catch (processingError) {
+      throw processingError;
+    } finally {
+      // Clean up uploaded file
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+
+  } catch (error) {
+    logger.error(`User import failed: ${error.message}`);
+    res.status(500).json({ 
+      error: error.message || "Import failed",
+      details: error.stack
+    });
+  }
+}
+
+// Process CSV files for user import
+async processUserCSV(filePath) {
+  return new Promise((resolve, reject) => {
+    const users = [];
+    
+    fs.createReadStream(filePath)
+      .pipe(csv())
+      .on("data", (row) => {
+        users.push({
+          name: row.name || row.Name || row.full_name || row['Full Name'],
+          email: row.email || row.Email || row['Email Address'],
+          password: row.password || row.Password || this.generateRandomPassword(),
+          role: row.role || row.Role || 'worker',
+          stationId: row.station_id || row.stationId || row['Station ID'] || row.station,
+        });
+      })
+      .on("end", () => {
+        resolve(users);
+      })
+      .on("error", (error) => {
+        reject(new Error(`CSV processing error: ${error.message}`));
+      });
+  });
+}
+
+// Process Excel files for user import
+async processUserExcel(filePath) {
+  try {
+    const workbook = xlsx.readFile(filePath);
+    const sheetName = workbook.SheetNames[0];
+    const worksheet = workbook.Sheets[sheetName];
+    const data = xlsx.utils.sheet_to_json(worksheet);
+
+    return data.map(row => ({
+      name: row.name || row.Name || row.full_name || row['Full Name'],
+      email: row.email || row.Email || row['Email Address'],
+      password: row.password || row.Password || this.generateRandomPassword(),
+      role: row.role || row.Role || 'worker',
+      stationId: row.station_id || row.stationId || row['Station ID'] || row.station,
+    }));
+  } catch (error) {
+    throw new Error(`Excel processing error: ${error.message}`);
+  }
+}
+
+// Process PDF files for user import
+async processUserPDF(filePath) {
+  try {
+    const dataBuffer = fs.readFileSync(filePath);
+    const data = await pdfParse(dataBuffer);
+    
+    const text = data.text;
+    const users = this.parseUserTextData(text);
+    
+    return users;
+  } catch (error) {
+    throw new Error(`PDF processing error: ${error.message}`);
+  }
+}
+
+// Process Word documents for user import
+async processUserWord(filePath) {
+  try {
+    const result = await mammoth.extractRawText({ path: filePath });
+    const text = result.value;
+    
+    const users = this.parseUserTextData(text);
+    
+    return users;
+  } catch (error) {
+    throw new Error(`Word document processing error: ${error.message}`);
+  }
+}
+
+// Parse text content for user information
+parseUserTextData(text) {
+  const users = [];
+  const lines = text.split('\n').filter(line => line.trim());
+  
+  // Pattern matching for user data
+  // Expecting formats like:
+  // "John Doe - john@example.com - admin"
+  // "Jane Smith, jane@example.com, worker, STA001"
+  
+  const userPattern = /^(.+?)[-,]\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})(?:[-,]\s*(super_admin|admin|worker))?(?:[-,]\s*(STA\d{3}))?/;
+  
+  for (const line of lines) {
+    const match = line.trim().match(userPattern);
+    if (match) {
+      const [, name, email, role = 'worker', stationId] = match;
+      if (name && email) {
+        users.push({
+          name: name.trim(),
+          email: email.trim(),
+          password: this.generateRandomPassword(),
+          role: role ? role.trim() : 'worker',
+          stationId: stationId ? stationId.trim() : null,
+        });
+      }
+    }
+  }
+  
+  return users;
+}
+
+// Validate user import data
+validateUserImportData(users, defaultStationId = null) {
+  return users.filter(user => {
+    // Basic validation
+    if (!user.name || !user.email || user.name.trim() === '' || user.email.trim() === '') {
+      return false;
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(user.email)) {
+      return false;
+    }
+
+    // Role validation
+    if (!['super_admin', 'admin', 'worker'].includes(user.role)) {
+      user.role = 'worker'; // Default to worker if invalid role
+    }
+
+    // Station ID validation and assignment
+    if (user.role !== 'super_admin') {
+      if (!user.stationId && defaultStationId) {
+        user.stationId = defaultStationId;
+      }
+      
+      if (!user.stationId) {
+        return false; // Admin and worker must have station
+      }
+    } else {
+      user.stationId = null; // Super admin doesn't need station
+    }
+
+    // Ensure password exists
+    if (!user.password) {
+      user.password = this.generateRandomPassword();
+    }
+
+    return true;
+  });
+}
+
+// Generate random password
+generateRandomPassword(length = 8) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+}
 }
 
 module.exports = new AuthController();

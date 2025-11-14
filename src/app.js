@@ -12,8 +12,17 @@ const reportRoutes = require("./routes/reportRoutes");
 const resultRoutes = require("./routes/resultRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 
+// Public routes (no authentication required)
+const publicStationRoutes = require("./routes/publicStationRoutes");
+const publicVoterRoutes = require("./routes/publicVoterRoutes");
+const publicReportRoutes = require("./routes/publicReportRoutes");
+
 const logger = require("./utils/logger");
 const { errorHandler } = require("./middlewares/errorHandler");
+const {
+  publicGetLimiter,
+  publicPostLimiter,
+} = require("./middlewares/publicRateLimit");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -40,7 +49,12 @@ app.use(limiter);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
+// Public routes (no authentication required) - must come before authenticated routes
+app.use("/api/stations", publicGetLimiter, publicStationRoutes);
+app.use("/api/voters", publicGetLimiter, publicVoterRoutes);
+app.use("/api/reports", publicReportRoutes);
+
+// Authenticated routes
 app.use("/api/auth", authRoutes);
 app.use("/api/stations", stationRoutes);
 app.use("/api/voters", voterRoutes);
